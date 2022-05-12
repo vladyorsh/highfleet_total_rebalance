@@ -1,5 +1,5 @@
 # HighFleet Total Rebalance
-![](mod_header.jpg)
+![](Mods/mod_header.jpg)
 
 Large, detailed and lore-friendly rebalance mod which is intended to bring more choice and some new content into HighFleet gameplay. Do not forget to check the latest published version on the [Nexus](https://www.nexusmods.com/highfleet/mods/5).
 
