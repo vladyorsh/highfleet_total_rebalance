@@ -100,7 +100,8 @@ class Node(object):
       self.output_order.append(attr)
 
   def remove(self, value):
-    self.output_order.remove(value)
+    if value in self.output_order:
+        self.output_order.remove(value)
   
   @classmethod
   def parse_from_text(cls, text):

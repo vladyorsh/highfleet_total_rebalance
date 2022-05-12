@@ -5,7 +5,7 @@ import importlib
 import random
 from utils.parsing import *
 
-parser = argparse.ArgumentParser(description='A ship .seria updater.')
+parser = argparse.ArgumentParser(description='A SG save editor.')
 
 parser.add_argument('--save', type=str,
                     help='save file location to tweak.')
