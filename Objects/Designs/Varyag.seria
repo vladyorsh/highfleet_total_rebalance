@@ -52,6 +52,7 @@ m_escadra_index=6
 m_ship_name=Varyag
 m_playable=true
 m_alignment=1
+m_flagship=true
 m_card_caption={align=2}{font=courier_28}бюпъц@{font=myriad_10}бяонл. ръф. йпеияеп
 m_card_main={align=0}{font=flash_large}ръцю/бея: 2@яйнпнярэ: 120 ЙЛ/В@дюкэмнярэ: 4040 ЙЛ@
 m_card_arma={align=0}{font=flash_large}бннпсфемхе:@004X CANNON 37ЛЛ@002X CANNON 2x305mm@004X CANNON 2x180mm@0016X MISSILE

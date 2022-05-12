@@ -6,7 +6,10 @@ Large, detailed and lore-friendly rebalance mod which is intended to bring more 
 ### Structure
 The repo contains source files of the mod instead of a release version with updated .seria files.
 
++ Data: dialogue files modified with new ship entries and fixed typos
 + Libraries: updated OL.seria and parts.seria part configuration files
++ Objects/Designs: updated crafts according to new OL.seria and parts.seria
 + highfleet-dialog-main*: decoded dialog files with localization tweaks and new ship entries
 + sources: Python source codes for modding tools written by me
++ Submods: different ship replacements done as optional submods
 + tweaks.ods: a table I use to track and note planned/applied changes
