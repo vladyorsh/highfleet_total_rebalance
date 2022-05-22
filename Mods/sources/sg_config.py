@@ -5,6 +5,7 @@ class ShipEntry(object):
         self.spawn_chance = spawn_chance
 
 STRIKE_GROUPS = {
+#Pre-endgame groups
 'default'	: [
     ShipEntry([ 'Gryphon' ]),
     ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
@@ -42,6 +43,21 @@ STRIKE_GROUPS = {
 ],
 5			: [
     ShipEntry([ 'Nomad' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+],
+#Endgame groups
+6			: [
+    ShipEntry([ 'Nomad' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+    ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+],
+'launcher'	: [
+    ShipEntry([ 'Typhon' ]), #Mandatory ship for a launcher group
     ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
     ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
     ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
