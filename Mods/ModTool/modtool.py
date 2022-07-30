@@ -1,7 +1,9 @@
 import sys
 import os
+import math
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
 from parsing import *
 
 class AppState:
@@ -371,6 +373,215 @@ class UpdaterPage(QWidget):
         self.target_path = QFileDialog.getExistingDirectory(self, 'Select target ships folder', self.app_state.root)
         self.target_widget.setText(self.target_path)
         
+        
+class MapWidget(QWidget):
+    def __init__(self, width, height, scale=1.0, city_scale=1.0):
+        super(MapWidget, self).__init__()
+        self.save = None
+        
+        self.city_scale = city_scale
+        self.scale = scale
+        
+        self.coord_x = 0
+        self.coord_y = 0
+        
+        self.mouse_x = -1
+        self.mouse_y = -1
+        
+        self.resize(width, height)
+        self.setMouseTracking(True)
+        self.update()
+        
+    def set_save(self, save):
+        self.save = save
+        self.update()
+        
+    def mouseMoveEvent(self, event):
+        self.mouse_x, self.mouse_y = event.x(), event.y()
+        self.coord_x, self.coord_y = self.unmap_coords(self.mouse_x, self.mouse_y)
+        self.update()
+        
+    def map_coords(self, x, y):
+        x = self.width()  / 2 + x * self.scale / 10
+        y = self.height() / 2 + y * self.scale / 10
+        
+        return int(x), int(y)
+        
+    def unmap_coords(self, x, y):
+        x = (x - self.width()  / 2) / self.scale * 10
+        y = (y - self.height() / 2) / self.scale * 10
+        
+        return x, y
+        
+    def diamond_poly(self, x, y, side):
+        poly = QPolygon()
+        side = side / 2 * (2 ** 1/2)
+        side = int(side)
+        poly.append(QPoint(x - side, y))
+        poly.append(QPoint(x, y - side))
+        poly.append(QPoint(x + side, y))
+        poly.append(QPoint(x, y + side))
+        
+        return poly
+    
+    def triangle_poly(self, x, y, side, rotated=False):
+        radius = side * (3 ** 1/2)/3
+        big_shift = int(radius * math.sin(math.pi/3))
+        small_shift = int(radius * math.sin(math.pi/6))
+        poly = QPolygon()
+        if not rotated:
+            poly.append(QPoint(x - big_shift, y + small_shift))
+            poly.append(QPoint(x + big_shift, y + small_shift))
+            poly.append(QPoint(x, y - big_shift))
+        else:
+            poly.append(QPoint(x - big_shift, y - small_shift))
+            poly.append(QPoint(x + big_shift, y - small_shift))
+            poly.append(QPoint(x, y + big_shift))
+        
+        return poly
+        
+    def paintEvent(self, event):
+        
+        painter = QPainter(self)
+        background = QRect(0, 0, self.width(), self.height())
+        painter.fillRect(background, QBrush(QColor(119, 144, 148)))
+        
+        if self.save is not None:
+            locations = self.save.get_children_by_name('m_locations')
+            
+            for location in locations:
+                x = getattr(location, 'm_position.x', 0)
+                y = getattr(location, 'm_position.y', 0)
+                size = int(location.m_citysize * self.city_scale * self.scale / 500)
+                
+                pen_thickness = max(1, int(self.scale))
+                large_font = int(8 * self.scale)
+                small_font = int(6 * self.scale)
+                offset = int(10 * self.scale)
+                
+                x, y = self.map_coords(x, y)
+                painter.setPen(QPen(QColor(255, 255, 255), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                painter.drawEllipse(QPoint(x, y), size, size)
+                
+                painter.setFont(QFont("Verdana", large_font ))
+                painter.drawText(QPoint(x + offset, y), location.m_name)
+                painter.setFont(QFont("Verdana", small_font))
+                painter.drawText(QPoint(x + offset, y + offset), location.m_codename)
+                
+                if hasattr(location, 'm_quest'):
+                    pen_thickness = max(1, int(2 * self.scale))
+                    half_side = int(8 * self.scale)
+                    very_large_font = int(10 * self.scale)
+                    offset = int(4 * self.scale)
+                        
+                    painter.setPen(QPen(QColor(255, 255, 0), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                    rect = QRect(x - half_side, y - half_side, 2 * half_side, 2 * half_side)
+                    painter.setFont(QFont("Verdana", very_large_font))
+                    painter.drawText(QPoint(x - offset, y + offset), '?')
+                    painter.drawRect(rect)
+                    
+            escadras = self.save.get_children_by_name('m_escadras')
+            
+            for escadra in escadras:
+                x = getattr(escadra, 'm_position.x', 0)
+                y = getattr(escadra, 'm_position.y', 0)
+                x, y = self.map_coords(x, y)
+                
+                side = int(10 * self.scale)
+                half_side = int(side / 2)
+                pen_thickness = max(1, int(2 * self.scale))
+                small_font = int(6 * self.scale)
+                offset = int(15 * self.scale)
+                
+                if getattr(escadra, 'm_role', 0) == 5: #Strike group
+                    rect = QRect(x - half_side, y - half_side, side, side)
+                    painter.setPen(QPen(QColor(255, 0, 0), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                    painter.drawRect(rect)
+                    painter.setFont(QFont("Verdana", small_font))
+                    painter.drawText(QPoint(x - 2 * offset, y + offset), escadra.m_name)
+                elif getattr(escadra, 'm_role', 0) == 1: #Convoy
+                    poly = self.triangle_poly(x, y, side, rotated=True)
+                    painter.setPen(QPen(QColor(0, 123, 0), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                    painter.drawPolygon(poly)
+                    painter.setFont(QFont("Verdana", small_font))
+                    painter.drawText(QPoint(x - offset, y - offset // 2), escadra.m_name)
+                elif getattr(escadra, 'm_role', 0) == 2: #Garrison
+                    AG = False
+                    MG = False
+                    
+                    stats = [ ship.find_by_attr('m_code', 47)[0] for ship in escadra.get_children_by_name('m_children') ]
+                    
+                    for stat in stats:
+                        if getattr(stat, 'm_tele_crafts', 0) > 0: AG = True
+                        if getattr(stat, 'm_tele_nukes', 0) > 0: MG =  True
+                    
+                    if AG:
+                        poly = self.diamond_poly(x, y, side)
+                        painter.setPen(QPen(QColor(255, 0, 0), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                        painter.drawPolygon(poly)
+                        painter.setFont(QFont("Verdana", small_font))
+                        painter.drawText(QPoint(x + offset // 2, y - offset // 2), escadra.m_name)
+                    if MG:
+                        poly = self.triangle_poly(x, y, side)
+                        painter.setPen(QPen(QColor(255, 0, 0), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                        painter.drawPolygon(poly)
+                        painter.setFont(QFont("Verdana", small_font))
+                        painter.drawText(QPoint(x + offset // 2, y - offset // 2), escadra.m_name)
+                    
+        if self.mouse_x != -1:
+            pen_thickness = max(1, int(1 * self.scale))
+            small_font = int(6 * self.scale)
+            
+            painter.setFont(QFont("Verdana", small_font))
+            painter.setPen(QPen(QColor(255, 255, 255), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))    
+            painter.drawText(QPoint(self.mouse_x, self.mouse_y), f'{self.coord_x:.1f}, {self.coord_y:.1f}')
+        
+        
+class MapViewerPage(QWidget):
+    def __init__(self, app_state):
+        super(MapViewerPage, self).__init__()
+        
+        self.app_state = app_state
+        
+        self.save_path = None
+        self.save_path_field = QLineEdit()
+        self.save_path_field.setReadOnly(True)
+        
+        self.open_button = QPushButton('Open save...')
+        self.open_button.clicked.connect(self.open_save)
+        
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(False)
+        
+        scale = 1.5
+        map_width, map_height = int(1000 * scale), int(2500 * scale)
+        
+        self.map_widget = MapWidget(map_width, map_height, scale)
+        self.scroll.setWidget(self.map_widget)
+        
+        layout = QGridLayout()
+        self.setLayout(layout)
+        
+        layout.addWidget(self.save_path_field, 0, 0)
+        layout.addWidget(self.open_button, 0, 1)
+        layout.addWidget(self.scroll, 1, 0)
+        
+        
+    def save_image(self):
+        path, _ = QFileDialog.getSaveFileName(self, 'Export Map')
+        
+        
+    def open_save(self):
+        try:
+            path, _ = QFileDialog.getOpenFileName(self, 'Open save', os.path.join(self.app_state.root, 'Saves'))
+            save = Node.from_file(path)
+        except:
+            self.app_state.log('Cannot open save:')
+            self.app_state.log(path)
+            return
+        self.save_path_field.setText(path)
+        self.map_widget.set_save(save)
+
 class MainWindow(QWidget):
     '''The main window which hauls several modding tools on its tabs'''
     def __init__(self, app_state):
@@ -383,14 +594,17 @@ class MainWindow(QWidget):
         
         self.logs = QTextEdit()
         self.logs.setReadOnly(True)
+        self.logs.setMaximumHeight(64)
         self.app_state.text_box = self.logs
         
         self.setup_page = SettingsPage(self.app_state)
         self.ship_updater_page = UpdaterPage(self.app_state)
+        self.map_viewer_page = MapViewerPage(self.app_state)
         
         self.tabwidget = QTabWidget()
         self.tabwidget.addTab(self.setup_page, "Settings")
         self.tabwidget.addTab(self.ship_updater_page, "Ship Updater")
+        self.tabwidget.addTab(self.map_viewer_page, "Map Viewer")
         layout.addWidget(self.tabwidget, 0, 0)
         layout.addWidget(self.logs, 1, 0)
 
@@ -459,3 +673,4 @@ if __name__ == '__main__':
 #TODO: Dots at message ends
 #TODO: Utils descriptions
 #TODO: Better updater worker with progress display
+#TODO: Map resizing widgets
