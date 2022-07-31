@@ -5,6 +5,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from parsing import *
+from tools import *
 
 class AppState:
     '''Holds the application options, such as paths to different key files. Is shared between different application pages.'''
@@ -22,7 +23,7 @@ class AppState:
         
     def validate(self):
         if self.root is None or not os.path.exists(self.root):
-            return 'The root dir does not exist.'
+            return [ 'The root dir does not exist.' ]
         
         retval = []
         if not os.path.exists(os.path.join(self.root, 'Highfleet.exe')):
@@ -375,12 +376,17 @@ class UpdaterPage(QWidget):
         
         
 class MapWidget(QWidget):
+    clicked = pyqtSignal()
+    
     def __init__(self, width, height, scale=1.0, city_scale=1.0):
         super(MapWidget, self).__init__()
-        self.save = None
+        
+        self.locations= None
+        self.escadras = None
         
         self.city_scale = city_scale
         self.scale = scale
+        self.selection_range=50 #50px
         
         self.coord_x = 0
         self.coord_y = 0
@@ -393,8 +399,23 @@ class MapWidget(QWidget):
         self.update()
         
     def set_save(self, save):
-        self.save = save
+        self.locations = save.get_children_by_name('m_locations')
+        self.escadras  = save.get_children_by_name('m_escadras')
         self.update()
+        
+    def selection_radius(self):
+        return self.selection_range * 10 / self.scale
+    
+    def find_escadras_in_region(self, x, y, radius):
+        x, y = self.unmap_coords(x, y)
+        chosen_escadras = []
+        if self.escadras is not None:
+            for escadra in self.escadras:
+                e_x, e_y = getattr(escadra, 'm_position.x', 0.0), getattr(escadra, 'm_position.y', 0.0)
+                distance = ((x - e_x) ** 2 + (y - e_y) ** 2) ** (1/2)
+                if distance < radius:
+                    chosen_escadras.append(escadra)
+        return chosen_escadras
         
     def mouseMoveEvent(self, event):
         self.mouse_x, self.mouse_y = event.x(), event.y()
@@ -446,10 +467,8 @@ class MapWidget(QWidget):
         background = QRect(0, 0, self.width(), self.height())
         painter.fillRect(background, QBrush(QColor(119, 144, 148)))
         
-        if self.save is not None:
-            locations = self.save.get_children_by_name('m_locations')
-            
-            for location in locations:
+        if self.locations is not None:
+            for location in self.locations:
                 x = getattr(location, 'm_position.x', 0)
                 y = getattr(location, 'm_position.y', 0)
                 size = int(location.m_citysize * self.city_scale * self.scale / 500)
@@ -479,10 +498,9 @@ class MapWidget(QWidget):
                     painter.setFont(QFont("Verdana", very_large_font))
                     painter.drawText(QPoint(x - offset, y + offset), '?')
                     painter.drawRect(rect)
-                    
-            escadras = self.save.get_children_by_name('m_escadras')
-            
-            for escadra in escadras:
+        
+        if self.escadras is not None:     
+            for escadra in self.escadras:
                 x = getattr(escadra, 'm_position.x', 0)
                 y = getattr(escadra, 'm_position.y', 0)
                 x, y = self.map_coords(x, y)
@@ -535,7 +553,19 @@ class MapWidget(QWidget):
             painter.setFont(QFont("Verdana", small_font))
             painter.setPen(QPen(QColor(255, 255, 255), pen_thickness, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))    
             painter.drawText(QPoint(self.mouse_x, self.mouse_y), f'{self.coord_x:.1f}, {self.coord_y:.1f}')
+       
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.press_pos = event.pos()
+            
+    def mouseReleaseEvent(self, event):
         
+        if (self.press_pos is not None and 
+            event.button() == Qt.LeftButton and 
+            event.pos() in self.rect()):
+                self.clicked.emit()
+                self.mouse_x, self.mouse_y = event.x(), event.y()
+        self.press_pos = None
         
 class MapViewerPage(QWidget):
     def __init__(self, app_state):
@@ -557,7 +587,26 @@ class MapViewerPage(QWidget):
         map_width, map_height = int(1000 * scale), int(2500 * scale)
         
         self.map_widget = MapWidget(map_width, map_height, scale)
+        self.map_widget.clicked.connect(self.map_click)
         self.scroll.setWidget(self.map_widget)
+        
+        self.chosen_enemy_list = QListWidget()
+        self.chosen_enemy_list.setMaximumWidth(192)
+        self.chosen_enemy_list.itemClicked.connect(self.display_escadra)
+        self.chosen_escadras = None
+        
+        self.add_new_button = QPushButton('Add escadra...')
+        self.edit_button = QPushButton('Edit escadra...')
+        self.escadra_data = QTextEdit()
+        self.escadra_data.setReadOnly(True)
+        self.escadra_data.setMaximumWidth(192)
+        
+        v_layout = QVBoxLayout()
+        v_layout.addWidget(self.chosen_enemy_list)
+        v_layout.addWidget(self.escadra_data)
+        v_layout.addWidget(self.edit_button)
+        v_layout.addWidget(self.add_new_button)
+        
         
         layout = QGridLayout()
         self.setLayout(layout)
@@ -565,10 +614,7 @@ class MapViewerPage(QWidget):
         layout.addWidget(self.save_path_field, 0, 0)
         layout.addWidget(self.open_button, 0, 1)
         layout.addWidget(self.scroll, 1, 0)
-        
-        
-    def save_image(self):
-        path, _ = QFileDialog.getSaveFileName(self, 'Export Map')
+        layout.addLayout(v_layout, 1, 1)
         
         
     def open_save(self):
@@ -581,7 +627,69 @@ class MapViewerPage(QWidget):
             return
         self.save_path_field.setText(path)
         self.map_widget.set_save(save)
-
+    
+    def escadra_preview_text(self, escadra):
+        
+        m_name = escadra.m_name
+        ships = [ ship.m_name for ship in escadra.get_children_by_name('m_children') ]
+        role = getattr(escadra, 'm_role', 0)
+        crafts, nukes = 0, 0
+        if role == 5:
+            role = 'Strike Group'
+        elif role == 1:
+            role = 'Convoy'
+        elif role == 2:
+            role = 'Garrison'            
+            AG = False
+            MG = False
+            stats = [ ship.find_by_attr('m_code', 47)[0] for ship in escadra.get_children_by_name('m_children') ]
+                    
+            for stat in stats:
+                if getattr(stat, 'm_tele_crafts', 0) > 0:
+                    AG = True
+                    crafts += getattr(stat, 'm_tele_crafts', 0)
+                if getattr(stat, 'm_tele_nukes', 0) > 0:
+                    MG =  True
+                    nukes += getattr(stat, 'm_tele_nukes', 0)
+            if AG: role += ', Aircraft'
+            if MG: role += ', Missile'
+        elif role == 0:
+            role = 'Player'
+        else:
+            role = 'None'
+                
+        loc_x, loc_y = getattr(escadra, 'm_position.x', 0.0), getattr(escadra, 'm_position.y', 0.0)
+        target_x, target_y = getattr(escadra, 'm_target_pos.x', 0.0), getattr(escadra, 'm_target_pos.y', 0.0)
+        
+        str_ = m_name + '\n' 
+        str_ += role + '\n'
+        for ship in ships[:-1]:
+            str_ += ship + ', '
+        str_ += ships[-1] + '\n'
+        str_ += f'Pos: {loc_x}, {loc_y}\n'
+        str_ += f'Tgt: {target_x}, {target_y}\n'
+        if nukes:
+            str_ += f'Nukes: {nukes}\n'
+        if crafts:
+            str_ += f'Crafts: {crafts}\n'
+        
+        return str_
+        
+    def display_escadra(self):
+        self.escadra_data.clear()
+        idx = self.chosen_enemy_list.currentRow()
+        escadra = self.chosen_enemy_list.item(idx).escadra
+        self.escadra_data.setText(escadra.output())
+        self.app_state.log(self.escadra_preview_text(escadra))
+        
+    def map_click(self):
+        self.chosen_enemy_list.clear()
+        self.chosen_escadras = self.map_widget.find_escadras_in_region(self.map_widget.mouse_x, self.map_widget.mouse_y, self.map_widget.selection_radius())
+        for escadra in self.chosen_escadras:
+            item = QListWidgetItem(escadra.m_name)
+            item.escadra = escadra
+            self.chosen_enemy_list.addItem(item)
+        
 class MainWindow(QWidget):
     '''The main window which hauls several modding tools on its tabs'''
     def __init__(self, app_state):
@@ -594,7 +702,7 @@ class MainWindow(QWidget):
         
         self.logs = QTextEdit()
         self.logs.setReadOnly(True)
-        self.logs.setMaximumHeight(64)
+        self.logs.setMaximumHeight(96)
         self.app_state.text_box = self.logs
         
         self.setup_page = SettingsPage(self.app_state)
@@ -674,3 +782,12 @@ if __name__ == '__main__':
 #TODO: Utils descriptions
 #TODO: Better updater worker with progress display
 #TODO: Map resizing widgets
+#TODO: Endgame spawn marks
+#TODO: Parse launcher groups
+#TODO: 2000km radius around Khiva
+#TODO: Scale slider
+#TODO: Escadra preview speed and range
+
+#classname, code, id, master_id, m_name
+#children (generatae owner)
+#position, alignment, target, role, inventory
