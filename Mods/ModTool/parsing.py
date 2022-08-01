@@ -54,7 +54,7 @@ class Node(object):
     return output_buff
 
   def write(self, path, logger=Logger()):
-    with open(path, 'w', encoding="ISO-8859-1") as f:
+    with open(path, 'w', encoding="cp1251") as f:
       f.write(self.output(logger))
 
   def get_children_by_id(self, id):
@@ -84,7 +84,7 @@ class Node(object):
 
   @classmethod
   def from_file(cls, path, logger=Logger()):
-    with open(path, 'r', encoding="ISO-8859-1") as f:
+    with open(path, 'r', encoding="cp1251") as f:
       text = f.read()
       node_text, _, _ = parse_parenthesis(text)
       ship = cls.parse_from_text(node_text, logger)

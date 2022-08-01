@@ -9,6 +9,12 @@ class Logger:
     def log(self, * args, ** kwargs):
         print(*args, **kwargs)
 
+class ShipEntry(object):
+    def __init__(self, ship_names, difficulties=['easy', 'normal', 'hard'], spawn_chance=1.0):
+        self.names = ship_names
+        self.difficulties = difficulties
+        self.spawn_chance = spawn_chance
+            
 def parse_parenthesis(text):
   '''Parses a text between a pair of parenthesis on the same level and which are preceded by newlines.
   That typically denotes a single HF config object, which may recursively contain further objects.'''
