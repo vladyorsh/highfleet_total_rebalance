@@ -1,6 +1,7 @@
 import sys
 import os
 import math
+import random
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
@@ -20,6 +21,7 @@ class AppState:
         #Additional files
         self.vanilla_OL_path = None
         self.sg_config_path = None
+        self.localization_path = None
         
     def validate(self):
         if self.root is None or not os.path.exists(self.root):
@@ -42,6 +44,13 @@ class AppState:
             self.parts_path = None
         else:
             self.parts_path = parts_path
+                
+        localization_path = os.path.join(self.root, 'Data/Dialogs/english.seria_enc')
+        if not os.path.exists(localization_path):
+            retval.append('Cannot find english.seria_enc')
+            self.localization_path = None
+        else:
+            self.localization_path = localization_path
                 
         return retval
         
@@ -74,6 +83,12 @@ class SettingsPage(QWidget):
         self.vanilla_OL_button = QPushButton('Open vanilla OL.seria...')
         self.vanilla_OL_button.clicked.connect(self.set_vanilla_OL)
         
+        self.localization_text = QLineEdit()
+        self.localization_text.setReadOnly(True)
+        
+        self.localization_button = QPushButton('Open localization .seria_enc...')
+        self.localization_button.clicked.connect(self.set_localization)
+        
         layout = QGridLayout()
         self.setLayout(layout)
         
@@ -85,6 +100,8 @@ class SettingsPage(QWidget):
         layout.addWidget(self.parts_button, 2, 1)
         layout.addWidget(self.vanilla_OL_text, 3, 0)
         layout.addWidget(self.vanilla_OL_button, 3, 1)
+        layout.addWidget(self.localization_text, 4, 0)
+        layout.addWidget(self.localization_button, 4, 1)
         
         self.update_text_fields()
         
@@ -93,6 +110,7 @@ class SettingsPage(QWidget):
         self.OL_text.setText(self.app_state.OL_path)
         self.parts_text.setText(self.app_state.parts_path)
         self.vanilla_OL_text.setText(self.app_state.vanilla_OL_path)
+        self.localization_text.setText(self.app_state.localization_path)
         
     def set_root(self):
         self.app_state.root = QFileDialog.getExistingDirectory(self, 'Select game directory', 'D:\Games\Steam\steamapps\common\HighFleet')
@@ -117,6 +135,10 @@ class SettingsPage(QWidget):
     
     def set_vanilla_OL(self):
         self.app_state.vanilla_OL_path, _ = QFileDialog.getOpenFileName(self, 'Select original OL.seria', self.app_state.root)
+        self.update_text_fields()
+        
+    def set_localization(self):
+        self.app_state.localization_path, _ = QFileDialog.getOpenFileName(self, 'Select localization file *.seria_enc', os.path.join(self.app_state.root, 'Data/Dialogs'))
         self.update_text_fields()
         
 class RenameDialog(QDialog):
@@ -376,6 +398,7 @@ class UpdaterPage(QWidget):
         
         
 class MapWidget(QWidget):
+    '''The key widget for displaying the map or manipulating escadras'''
     clicked = pyqtSignal()
     
     def __init__(self, width, height, scale=1.0, city_scale=1.0):
@@ -930,6 +953,7 @@ class EditEscadraDialog(QDialog):
         
 class MapViewerPage(QWidget):
     def __init__(self, app_state):
+        '''Tool page containing the map widget and buttons'''
         super(MapViewerPage, self).__init__()
         
         self.app_state = app_state
@@ -1286,18 +1310,290 @@ class CamoSwitchPage(QWidget):
             return
         self.save.write(output_path)
 
-'''
+        
 class AutoSaveUpdater(QWidget):
+    '''Page allowing to edit and apply simple scripts which edit/add new escadras in a randomized way'''
+    
+    class Location:
+        def __init__(self, name, pos_x, pos_y, radius_min, radius_max, is_city):
+            self.name = name
+            self.pos_x = pos_x
+            self.pos_y = pos_y
+            self.radius_min = radius_min
+            self.radius_max = radius_max
+            self.is_city = is_city
+            
+    class ShipEntry(object):
+        def __init__(self, ship_names, difficulties=['easy', 'normal', 'hard'], spawn_chance=1.0):
+            self.names = ship_names
+            self.difficulties = difficulties
+            self.spawn_chance = spawn_chance
+            
+    class Fleet:
+        def __init__(self, name, ship_entries):
+            self.name = name
+            self.ship_entries = ship_entries
+                
+        def roll(self, difficulty):
+            valid_ships = [ ship for ship in self.ship_entries if difficulty in ship.difficulties ]
+            filtered_ships = [ ship for ship in valid_ships is random.random() <= ship.spawn_chance() ]
+            sampled_ships = [ random.choice(ship.names) for ship in filtered_ships ]
+            
+            return sampled_ships
+        
     def __init__(self, app_state):
         super(AutoSaveUpdater, self).__init__()
             
         self.app_state = app_state
-        self.save = None
         
-#What:  sg, garrison, convoy
-#Where: (city,everywhere) in radius (less than, more than)
-#Composition
-'''        
+        self.custom_locations = None
+        self.custom_fleets = None
+        
+        #Table of new enemies
+        self.add_table = QTableWidget()
+        self.add_table.setColumnCount(4)
+        self.add_table.setHorizontalHeaderLabels(['Role', 'Ref. Location', 'Ship List'])
+        
+        self.add_table_add_button = QPushButton('Add')
+        self.add_table_remove_button = QPushButton('Remove')
+        self.add_table_add_button.clicked.connect(self.table_add(self.add_table))
+        self.add_table_remove_button.clicked.connect(self.table_remove(self.add_table))
+        
+        
+        self.add_table_button_box = QVBoxLayout()
+        self.add_table_button_box.addWidget(self.add_table_add_button)
+        self.add_table_button_box.addWidget(self.add_table_remove_button)
+        
+        self.add_table_layout = QHBoxLayout()
+        self.add_table_layout.addWidget(self.add_table)
+        self.add_table_layout.addLayout(self.add_table_button_box)
+        
+        #Table of enemy modifications
+        self.modify_table = QTableWidget()
+        self.modify_table.setColumnCount(4)
+        self.modify_table.setHorizontalHeaderLabels(['Role', 'Index', 'Remove List', 'Add List'])
+        
+        self.modify_table_add_button = QPushButton('Add')
+        self.modify_table_remove_button = QPushButton('Remove')
+        self.modify_table_add_button.clicked.connect(self.table_add(self.modify_table))
+        self.modify_table_remove_button.clicked.connect(self.table_remove(self.modify_table))
+        
+        self.modify_table_button_box = QVBoxLayout()
+        self.modify_table_button_box.addWidget(self.modify_table_add_button)
+        self.modify_table_button_box.addWidget(self.modify_table_remove_button)
+        
+        self.modify_table_layout = QHBoxLayout()
+        self.modify_table_layout.addWidget(self.modify_table)
+        self.modify_table_layout.addLayout(self.modify_table_button_box)
+        
+        #Compositions list
+        self.compositions_list = QListWidget()
+        self.compositions_list.itemClicked.connect(self.display_fleet)
+            
+        self.compositions_add_button = QPushButton('Add')
+        self.compositions_remove_button = QPushButton('Remove')
+        
+        self.compositions_button_box = QVBoxLayout()
+        self.compositions_button_box.addWidget(self.compositions_add_button)
+        self.compositions_button_box.addWidget(self.compositions_remove_button)
+        
+        self.compositions_layout = QHBoxLayout()
+        self.compositions_layout.addWidget(self.compositions_list)
+        self.compositions_layout.addLayout(self.compositions_button_box)
+        
+        self.init_compositions()
+        
+        #Locations list
+        self.locations_list = QListWidget()
+        self.locations_list.itemClicked.connect(self.display_location)
+            
+        self.locations_add_button = QPushButton('Add')
+        self.locations_remove_button = QPushButton('Remove')
+        
+        self.locations_button_box = QVBoxLayout()
+        self.locations_button_box.addWidget(self.locations_add_button)
+        self.locations_button_box.addWidget(self.locations_remove_button)
+        
+        self.locations_layout = QHBoxLayout()
+        self.locations_layout.addWidget(self.locations_list)
+        self.locations_layout.addLayout(self.locations_button_box)
+        
+        self.init_locations()
+        
+        self.info_label = QLabel()
+        self.info_label.setWordWrap(True)
+        
+        #Main buttons
+        self.load_button  = QPushButton('Load config...')
+        self.store_button = QPushButton('Save config...')
+        self.apply_button = QPushButton('Select save and apply...')
+        
+        self.main_button_box = QVBoxLayout()
+        self.main_button_box.addWidget(self.load_button)
+        self.main_button_box.addWidget(self.store_button)
+        self.main_button_box.addWidget(self.apply_button)
+        
+        layout = QGridLayout()
+        self.setLayout(layout)
+        layout.addLayout(self.add_table_layout, 0, 0)
+        layout.addLayout(self.modify_table_layout, 0, 1)
+        layout.addLayout(self.compositions_layout, 1, 0)
+        layout.addLayout(self.locations_layout, 1, 1)
+        layout.addWidget(self.info_label, 2, 0)
+        layout.addLayout(self.main_button_box, 2, 1)
+        
+    def display_location(self):
+        loc = self.locations_list.currentItem().location
+        text = f'Location: {loc.name}, is city: {loc.is_city}\nX: {loc.pos_x}, Y: {loc.pos_y}\nBand: {loc.radius_min}–{loc.radius_max}'
+        self.info_label.setText(text)
+
+    def display_fleet(self):
+        fleet = self.compositions_list.currentItem().fleet
+        
+        text = f'Composition: {fleet.name}\n'
+        for entry in fleet.ship_entries:
+            difficulties = ', '.join(entry.difficulties)
+            ship_names = ', '.join(entry.names)
+            spawn_chance = entry.spawn_chance
+            
+            text += f'{difficulties}: {ship_names} x {spawn_chance}\n'
+            
+        self.info_label.setText(text)
+        
+    def open_save(self):
+        path = None
+        try:
+            path, _ = QFileDialog.getOpenFileName(self, 'Open save', os.path.join(self.app_state.root, 'Saves'))
+            save = Node.from_file(path)
+            return save
+        except:
+            self.app_state.log('Cannot open save:')
+            self.app_state.log(path)
+            return
+        
+    def init_compositions(self):
+        self.compositions_list.clear()
+            
+        #Initializing default fleets
+            
+        DEFAULT = QListWidgetItem('Default')
+        SG0 = QListWidgetItem('SG0')
+        SG1 = QListWidgetItem('SG1')
+        SG2 = QListWidgetItem('SG2')
+        SG3 = QListWidgetItem('SG3')
+        SG4 = QListWidgetItem('SG4')
+        SG5 = QListWidgetItem('SG5')
+        SG_END = QListWidgetItem('SG_END')
+        LAUNCHER = QListWidgetItem('LAUNCHER')
+            
+        DEFAULT.fleet = AutoSaveUpdater.Fleet('Default',
+        [
+        ShipEntry([ 'Gryphon' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry(['Tarantul ARM'], ['hard']),
+        ])
+        
+        SG0.fleet = AutoSaveUpdater.Fleet('SG0',
+        [
+        ShipEntry([ 'Gryphon' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry(['Tarantul ARM'], ['hard']),
+        ])
+        
+        SG1.fleet = AutoSaveUpdater.Fleet('SG1',
+        [
+        ShipEntry([ 'Gryphon' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry(['Tarantul ARM'], ['hard']),
+        ])
+        
+        SG2.fleet = AutoSaveUpdater.Fleet('SG2',
+        [
+        ShipEntry([ 'Gryphon' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry(['Tarantul ARM'], ['hard']),
+        ])
+        
+        SG3.fleet = AutoSaveUpdater.Fleet('SG3',
+        [
+        ShipEntry([ 'Nomad' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ])
+        
+        SG4.fleet = AutoSaveUpdater.Fleet('SG4',
+        [
+        ShipEntry([ 'Nomad' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ])
+        
+        SG5.fleet = AutoSaveUpdater.Fleet('SG5',
+        [
+        ShipEntry([ 'Nomad' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ])
+        
+        SG_END.fleet = AutoSaveUpdater.Fleet('SG_END',
+        [
+        ShipEntry([ 'Nomad' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ])
+        
+        LAUNCHER.fleet = AutoSaveUpdater.Fleet('LAUNCHER',
+        [
+        ShipEntry([ 'Typhon' ]), #Mandatory ship for a launcher group
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ShipEntry([ 'Gryphon', 'Borey', 'Kormoran', 'Negev' ]),
+        ])
+        
+        self.compositions_list.addItem(DEFAULT)
+        self.compositions_list.addItem(SG0)
+        self.compositions_list.addItem(SG1)
+        self.compositions_list.addItem(SG2)
+        self.compositions_list.addItem(SG3)
+        self.compositions_list.addItem(SG4)
+        self.compositions_list.addItem(SG5)
+        self.compositions_list.addItem(SG_END)
+        self.compositions_list.addItem(LAUNCHER)
+        
+        
+        
+    def init_locations(self):
+        self.locations_list.clear()
+        
+        UR = QListWidgetItem('UR')
+        UR.location = AutoSaveUpdater.Location('UR', None, None, 0, 0, True)
+        
+        KHIVA = QListWidgetItem('KHIVA')
+        KHIVA.location = AutoSaveUpdater.Location('KHIVA', None, None, 0, 0, True)
+            
+        self.locations_list.addItem(UR)
+        self.locations_list.addItem(KHIVA)
+        
+    def table_add(self, table):
+        def add_row():
+            table.insertRow(table.rowCount())
+        return add_row
+        
+    def table_remove(self, table):
+        def remove_row():
+            table.removeRow(table.currentRow())
+        return remove_row
+
 class MainWindow(QWidget):
     '''The main window which hauls several modding tools on its tabs'''
     def __init__(self, app_state):
@@ -1316,13 +1612,16 @@ class MainWindow(QWidget):
         self.setup_page = SettingsPage(self.app_state)
         self.ship_updater_page = UpdaterPage(self.app_state)
         self.map_viewer_page = MapViewerPage(self.app_state)
+        self.auto_updater = AutoSaveUpdater(self.app_state)
         self.camo_switch_page= CamoSwitchPage(self.app_state)
         
         self.tabwidget = QTabWidget()
         self.tabwidget.addTab(self.setup_page, "Settings")
         self.tabwidget.addTab(self.ship_updater_page, "Ship Updater")
         self.tabwidget.addTab(self.map_viewer_page, "Map Viewer")
+        self.tabwidget.addTab(self.auto_updater, "Save Updater")
         self.tabwidget.addTab(self.camo_switch_page, "Camo Switch")
+        
         layout.addWidget(self.tabwidget, 0, 0)
         layout.addWidget(self.logs, 1, 0)
 
@@ -1368,6 +1667,7 @@ class WelcomeWindow(QWidget):
     
         
 def main():
+    random.seed()
     app = QApplication(sys.argv)
 
     screen = WelcomeWindow()
@@ -1400,7 +1700,8 @@ if __name__ == '__main__':
 #TODO: Text edit masks
 #TODO: Check for possible PROFILE@No bugs
 #TODO: Default output path with profile.seria
-
+#TODO: Fix "cannot open save" message (path)
+        
 #classname, code, id, master_id, m_name
 #children (generatae owner)
 #position, alignment, target, role, inventory
