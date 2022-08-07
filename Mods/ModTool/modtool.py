@@ -164,6 +164,7 @@ if __name__ == '__main__':
 #TODO: Check for possible PROFILE@No bugs
 #TODO: Default output path with profile.seria
 #TODO: Fix "cannot open save" message (path)
+#TODO: Move fleet roles into separate global constants
         
 #classname, code, id, master_id, m_name
 #children (generatae owner)

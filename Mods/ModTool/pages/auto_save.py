@@ -1,17 +1,89 @@
 import os
+import math
 from PyQt5.QtWidgets import *
 from parsing import *
 
+class Roles:
+    Player = 0
+    Convoy = 1
+    Garrison = 2
+    Strike = 5
+    
+    NAMES = {
+        Player : 'Player',
+        Convoy : 'Convoy',
+        Garrison : 'Garrison',
+        Strike : 'Strike Group',
+    }
+
+class NewEscadraEntryDialog(QDialog):
+    def __init__(self, app_state, role, location_item, fleet_item, locations_list, fleets_list):
+        super(NewEscadraEntryDialog, self).__init__()
+        
+        self.app_state = app_state
+        self.locations_list = locations_list
+        self.fleets_list = fleets_list
+        
+        self.setWindowTitle('Edit entry')
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+        
+        self.role_widget = QComboBox()
+        self.roles = [Roles.NAMES[Roles.Garrison], Roles.NAMES[Roles.Garrison], Roles.NAMES[Roles.Strike]]
+        self.role_ids = [ Roles.Garrison, Roles.Convoy, Roles.Strike ]
+        self.role_widget.addItems(self.roles)
+        
+        if role in self.roles:
+            self.role_widget.setCurrentIndex(self.role_ids.index[role])
+                
+        self.fleet_widget = QComboBox()
+        self.fleet_names = [ fleet.fleet.name for fleet in fleets_list ]
+        self.fleet_widget.addItems(self.fleet_names)
+        
+        if fleet_item is not None and fleet_item.fleet.name in self.fleet_names:
+            self.fleet_widget.setCurrentIndex(self.fleet_names.index(fleet_item.fleet.name))
+                
+        self.loc_widget = QComboBox()
+        self.loc_names  = [ loc.location.name for loc in locations_list ]
+        self.loc_widget.addItems(self.loc_names)
+        
+        if location_item is not None and location_item.location.name in self.loc_names:
+            self.loc_widget.setCurrentIndex(self.loc_names.index(location_item.location.name))
+                
+        layout = QGridLayout()
+        self.setLayout(layout)
+        
+        layout.addWidget(QLabel(text='Role:'), 0, 0)
+        layout.addWidget(self.role_widget, 0, 1)
+        layout.addWidget(QLabel(text='Fleet:'), 1, 0)
+        layout.addWidget(self.fleet_widget, 1, 1)
+        layout.addWidget(QLabel(text='Location:'), 2, 0)
+        layout.addWidget(self.loc_widget, 2, 1)
+        layout.addWidget(self.buttonBox, 3, 1)
+        
+                
+    def extract_choice(self):
+        role = self.role_ids[self.role_widget.currentIndex()]
+        fleet= self.fleets_list[self.fleet_widget.currentIndex()].fleet
+        loc  = self.locations_list[self.loc_widget.currentIndex()].location
+        
+        return role, fleet, loc
+        
 class AutoSaveUpdater(QWidget):
     '''Page allowing to edit and apply simple scripts which edit/add new escadras in a randomized way'''
     
     class Location:
-        def __init__(self, name, pos_x, pos_y, radius_min, radius_max, is_city):
+        def __init__(self, name, pos_x, pos_y, radius_min, radius_max, sector_min, sector_max, is_city):
             self.name = name
             self.pos_x = pos_x
             self.pos_y = pos_y
             self.radius_min = radius_min
             self.radius_max = radius_max
+            self.sector_min = sector_min
+            self.sector_max = sector_max
             self.is_city = is_city
             
     class ShipEntry(object):
@@ -42,17 +114,20 @@ class AutoSaveUpdater(QWidget):
         
         #Table of new enemies
         self.add_table = QTableWidget()
-        self.add_table.setColumnCount(4)
+        self.add_table.setColumnCount(3)
         self.add_table.setHorizontalHeaderLabels(['Role', 'Ref. Location', 'Ship List'])
         
         self.add_table_add_button = QPushButton('Add')
         self.add_table_remove_button = QPushButton('Remove')
-        self.add_table_add_button.clicked.connect(self.table_add(self.add_table))
+        self.add_table_change_button = QPushButton('Change')
+        self.add_table_add_button.clicked.connect(self.add_table_add)
         self.add_table_remove_button.clicked.connect(self.table_remove(self.add_table))
+        self.add_table_change_button.clicked.connect(self.add_table_change)
         
         
         self.add_table_button_box = QVBoxLayout()
         self.add_table_button_box.addWidget(self.add_table_add_button)
+        self.add_table_button_box.addWidget(self.add_table_change_button)
         self.add_table_button_box.addWidget(self.add_table_remove_button)
         
         self.add_table_layout = QHBoxLayout()
@@ -66,7 +141,7 @@ class AutoSaveUpdater(QWidget):
         
         self.modify_table_add_button = QPushButton('Add')
         self.modify_table_remove_button = QPushButton('Remove')
-        self.modify_table_add_button.clicked.connect(self.table_add(self.modify_table))
+        #self.modify_table_add_button.clicked.connect(self.modify_table_add)
         self.modify_table_remove_button.clicked.connect(self.table_remove(self.modify_table))
         
         self.modify_table_button_box = QVBoxLayout()
@@ -135,7 +210,7 @@ class AutoSaveUpdater(QWidget):
         
     def display_location(self):
         loc = self.locations_list.currentItem().location
-        text = f'Location: {loc.name}, is city: {loc.is_city}\nX: {loc.pos_x}, Y: {loc.pos_y}\nBand: {loc.radius_min}–{loc.radius_max}'
+        text = f'Location: {loc.name}, is city: {loc.is_city}\nX: {loc.pos_x}, Y: {loc.pos_y}\nBand: {loc.radius_min}–{loc.radius_max}\nSector: {loc.sector_min}-{loc.sector_max}'
         self.info_label.setText(text)
 
     def display_fleet(self):
@@ -265,18 +340,42 @@ class AutoSaveUpdater(QWidget):
         self.locations_list.clear()
         
         UR = QListWidgetItem('UR')
-        UR.location = AutoSaveUpdater.Location('UR', None, None, 0, 0, True)
+        UR.location = AutoSaveUpdater.Location('UR', None, None, 0, 0, 0.0, 2 * math.pi, True)
         
         KHIVA = QListWidgetItem('KHIVA')
-        KHIVA.location = AutoSaveUpdater.Location('KHIVA', None, None, 0, 0, True)
+        KHIVA.location = AutoSaveUpdater.Location('KHIVA', None, None, 0, 0, 0.0, 2 * math.pi, True)
             
         self.locations_list.addItem(UR)
         self.locations_list.addItem(KHIVA)
         
-    def table_add(self, table):
-        def add_row():
-            table.insertRow(table.rowCount())
-        return add_row
+    def add_table_add(self):
+        locations = [ self.locations_list.item(i) for i in range(self.locations_list.count()) ]
+        compositions = [ self.compositions_list.item(i) for i in range(self.compositions_list.count()) ]
+        dialog = NewEscadraEntryDialog(self.app_state, None, None, None, locations, compositions)
+        retval = dialog.exec_()
+        if retval == QDialog.Accepted:
+            row = self.add_table.rowCount()
+            role, fleet, location = dialog.extract_choice()
+            
+            self.add_table.insertRow(row)
+            
+            role_item = QTableWidgetItem(Roles.NAMES[role])
+            role_item.role = role
+            
+            loc_item = QTableWidgetItem(location.name)
+            loc_item.location = location
+            
+            fleet_item = QTableWidgetItem(fleet.name)
+            fleet_item.fleet = fleet
+            
+            self.add_table.setItem(row, 0, role_item)
+            self.add_table.setItem(row, 1, loc_item)
+            self.add_table.setItem(row, 2, fleet_item)
+        else:
+            pass
+                
+    def add_table_change(self):
+        raise NotImplementedError('New fleet entry change is not implemented yet')
         
     def table_remove(self, table):
         def remove_row():
